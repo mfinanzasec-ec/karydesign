@@ -1,4 +1,4 @@
-# Cuadernos & Co. — Panel (MVP Inventario)
+# Kary Design — Panel (MVP Inventario)
 
 ## Correr en tu computadora
 ```bash
