@@ -9,11 +9,13 @@ import Clientes from './views/Clientes.jsx'
 import Configuracion from './views/Configuracion.jsx'
 import Impuestos from './views/Impuestos.jsx'
 import Login from './views/Login.jsx'
+import Cotizaciones from './views/Cotizaciones.jsx'
 import { useBusinessSettings } from './hooks/useBusinessSettings.js'
 import { useAuth } from './hooks/useAuth.js'
 
 const NAV = [
   { key: 'inventario', label: 'Inventario' },
+  { key: 'cotizaciones', label: 'Cotizaciones' },
   { key: 'ventas', label: 'Ventas' },
   { key: 'clientes', label: 'Clientes' },
   { key: 'etiquetas', label: 'Etiquetas' },
@@ -86,6 +88,7 @@ export default function App() {
       {/* Contenido */}
       <main className="flex-1 px-10 py-8 max-w-6xl">
         {active === 'inventario' && allowedModules.includes('inventario') && <Inventario />}
+        {active === 'cotizaciones' && allowedModules.includes('cotizaciones') && <Cotizaciones />}
         {active === 'ventas' && allowedModules.includes('ventas') && <Ventas />}
         {active === 'clientes' && allowedModules.includes('clientes') && <Clientes />}
         {active === 'etiquetas' && allowedModules.includes('etiquetas') && <Etiquetas onGoToSettings={() => setActive('configuracion')} />}
