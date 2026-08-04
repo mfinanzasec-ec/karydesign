@@ -4,6 +4,7 @@ import { supabase } from '../supabaseClient.js'
 
 const MODULES = [
   { key: 'inventario', label: 'Inventario' },
+  { key: 'cotizaciones', label: 'Cotizaciones' },
   { key: 'ventas', label: 'Ventas' },
   { key: 'clientes', label: 'Clientes' },
   { key: 'etiquetas', label: 'Etiquetas' },
