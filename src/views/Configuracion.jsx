@@ -12,6 +12,7 @@ export default function Configuracion() {
   const [logoFile, setLogoFile] = useState(null)
   const [preview, setPreview] = useState(null)
   const [barcodeScannerEnabled, setBarcodeScannerEnabled] = useState(false)
+  const [recoversIvaCredit, setRecoversIvaCredit] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState(null)
@@ -23,6 +24,7 @@ export default function Configuracion() {
       setAddress(settings.address || '')
       setPreview(settings.logo_url || null)
       setBarcodeScannerEnabled(!!settings.barcode_scanner_enabled)
+      setRecoversIvaCredit(settings.recovers_iva_credit !== false)
     }
   }, [settings])
 
@@ -46,7 +48,7 @@ export default function Configuracion() {
         const { data: pub } = supabase.storage.from('logos').getPublicUrl(path)
         logoUrl = pub.publicUrl
       }
-      const payload = { business_name: businessName, phone: phone || null, address: address || null, logo_url: logoUrl, barcode_scanner_enabled: barcodeScannerEnabled, updated_at: new Date().toISOString() }
+      const payload = { business_name: businessName, phone: phone || null, address: address || null, logo_url: logoUrl, barcode_scanner_enabled: barcodeScannerEnabled, recovers_iva_credit: recoversIvaCredit, updated_at: new Date().toISOString() }
       if (settings?.id) {
         const { error } = await supabase.from('business_settings').update(payload).eq('id', settings.id)
         if (error) throw error
@@ -93,6 +95,26 @@ export default function Configuracion() {
         <div>
           <span className="block text-xs font-mono uppercase tracking-wide text-ink/50 mb-1">Dirección</span>
           <input value={address} onChange={(e) => setAddress(e.target.value)} className="input" />
+        </div>
+
+        <div className="border border-line rounded-sm p-4 bg-paperdark/50">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={recoversIvaCredit}
+              onChange={(e) => setRecoversIvaCredit(e.target.checked)}
+              className="mt-1"
+            />
+            <span>
+              <span className="text-sm font-medium text-ink">Mi negocio recupera crédito tributario de IVA</span>
+              <span className="block text-xs text-ink/50 mt-1">
+                Actívalo si cobras IVA a tus clientes y presentas Formulario 104 (RIMPE Emprendedor o Régimen General) — en ese caso,
+                el IVA que pagas al comprar insumos NO se cuenta como costo, porque lo recuperas. Desactívalo si eres RIMPE Negocio
+                Popular (no cobras IVA a tus clientes) — ahí el IVA que pagas sí se vuelve parte del costo de tus productos. Si no
+                estás seguro, confírmalo con tu contador; puedes cambiarlo cuando quieras.
+              </span>
+            </span>
+          </label>
         </div>
 
         <div className="border border-line rounded-sm p-4 bg-paperdark/50">

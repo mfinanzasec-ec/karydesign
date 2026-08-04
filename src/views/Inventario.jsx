@@ -1,6 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { supabase } from '../supabaseClient.js'
 import Modal from '../components/Modal.jsx'
+import { useBusinessSettings } from '../hooks/useBusinessSettings.js'
+
+const IVA_RATE = 0.15
 
 const BASE_CATEGORIES = ['Hojas', 'Cartulinas', 'Anillos', 'Láminas', 'Herramientas', 'Otro']
 
@@ -67,6 +70,8 @@ function money(n) {
 }
 
 export default function Inventario() {
+  const { settings } = useBusinessSettings()
+  const recoversIvaCredit = settings?.recovers_iva_credit !== false
   const [products, setProducts] = useState([])
   const [variantsByProduct, setVariantsByProduct] = useState({})
   const [loading, setLoading] = useState(true)
@@ -221,6 +226,7 @@ export default function Inventario() {
       {showNewVariant && (
         <NewVariantModal
           product={showNewVariant}
+          recoversIvaCredit={recoversIvaCredit}
           onClose={() => setShowNewVariant(null)}
           onCreated={() => { setShowNewVariant(null); loadAll() }}
         />
@@ -229,6 +235,7 @@ export default function Inventario() {
       {showNewProduct && (
         <NewProductModal
           categoryOptions={categoryOptions}
+          recoversIvaCredit={recoversIvaCredit}
           onClose={() => setShowNewProduct(false)}
           onCreated={() => { setShowNewProduct(false); loadAll() }}
         />
@@ -238,6 +245,7 @@ export default function Inventario() {
         <StockEntryModal
           product={showStockEntry.product}
           variant={showStockEntry.variant}
+          recoversIvaCredit={recoversIvaCredit}
           onClose={() => setShowStockEntry(null)}
           onSaved={() => { setShowStockEntry(null); loadAll() }}
         />
@@ -371,7 +379,7 @@ function ProductRow({ product, variants, expanded, onToggle, onAddStock, onAddVa
   )
 }
 
-function NewProductModal({ categoryOptions, onClose, onCreated }) {
+function NewProductModal({ categoryOptions, recoversIvaCredit, onClose, onCreated }) {
   const [name, setName] = useState('')
   const [category, setCategory] = useState(categoryOptions[0] || 'Otro')
   const [newCategory, setNewCategory] = useState('')
@@ -381,10 +389,15 @@ function NewProductModal({ categoryOptions, onClose, onCreated }) {
   const [hasVariants, setHasVariants] = useState(false)
   const [initialStock, setInitialStock] = useState('')
   const [initialCost, setInitialCost] = useState('')
+  const [includesIva, setIncludesIva] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
 
   const finalCategory = addingCategory ? capitalizeWords(newCategory) : category
+  const enteredUnit = Number(initialCost) || 0
+  const unitNet = includesIva ? enteredUnit / (1 + IVA_RATE) : enteredUnit
+  const unitIva = includesIva ? enteredUnit - unitNet : 0
+  const costForInventory = includesIva ? (recoversIvaCredit ? unitNet : enteredUnit) : enteredUnit
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -416,7 +429,7 @@ function NewProductModal({ categoryOptions, onClose, onCreated }) {
           price: Number(price) || 0,
           has_variants: hasVariants,
           stock: hasVariants ? 0 : Number(initialStock) || 0,
-          avg_cost: hasVariants ? 0 : Number(initialCost) || 0,
+          avg_cost: hasVariants ? 0 : costForInventory,
         })
         .select()
         .single()
@@ -427,10 +440,11 @@ function NewProductModal({ categoryOptions, onClose, onCreated }) {
           product_id: created.id,
           movement_type: 'entrada',
           quantity: Number(initialStock),
-          unit_cost: Number(initialCost) || 0,
+          unit_cost: costForInventory,
+          iva_amount: Number((unitIva * Number(initialStock)).toFixed(2)),
           reason: 'compra',
         })
-        await insertBatch(created.id, null, Number(initialStock), Number(initialCost))
+        await insertBatch(created.id, null, Number(initialStock), costForInventory)
       }
       onCreated()
     } catch (e2) {
@@ -492,13 +506,28 @@ function NewProductModal({ categoryOptions, onClose, onCreated }) {
         </Field>
 
         {!hasVariants && (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Stock inicial">
-              <input type="number" value={initialStock} onChange={(e) => setInitialStock(e.target.value)} className="input" />
-            </Field>
-            <Field label="Costo de compra (c/u)">
-              <input type="number" step="0.01" value={initialCost} onChange={(e) => setInitialCost(e.target.value)} className="input" />
-            </Field>
+          <div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Stock inicial">
+                <input type="number" value={initialStock} onChange={(e) => setInitialStock(e.target.value)} className="input" />
+              </Field>
+              <Field label={includesIva ? 'Costo de compra c/u (con IVA)' : 'Costo de compra (c/u)'}>
+                <input type="number" step="0.01" value={initialCost} onChange={(e) => setInitialCost(e.target.value)} className="input" />
+              </Field>
+            </div>
+            {Number(initialCost) > 0 && (
+              <label className="flex items-center gap-2 text-sm text-ink/70 mt-2">
+                <input type="checkbox" checked={includesIva} onChange={(e) => setIncludesIva(e.target.checked)} />
+                El costo incluye IVA (15%)
+              </label>
+            )}
+            {includesIva && Number(initialCost) > 0 && (
+              <p className="text-[11px] text-ink/50 font-mono bg-paperdark px-3 py-2 rounded-sm mt-2">
+                Neto: {money(unitNet)} c/u · IVA: {money(unitIva)} c/u · {recoversIvaCredit
+                  ? 'se registra el costo NETO (recuperas el IVA como crédito tributario).'
+                  : 'se registra el costo CON IVA (no lo recuperas, es Negocio Popular).'}
+              </p>
+            )}
           </div>
         )}
 
@@ -512,14 +541,20 @@ function NewProductModal({ categoryOptions, onClose, onCreated }) {
   )
 }
 
-function NewVariantModal({ product, onClose, onCreated }) {
+function NewVariantModal({ product, recoversIvaCredit, onClose, onCreated }) {
   const [variantName, setVariantName] = useState('')
   const [price, setPrice] = useState('')
   const [barcode, setBarcode] = useState('')
   const [initialStock, setInitialStock] = useState('')
   const [initialCost, setInitialCost] = useState('')
+  const [includesIva, setIncludesIva] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
+
+  const enteredUnit = Number(initialCost) || 0
+  const unitNet = includesIva ? enteredUnit / (1 + IVA_RATE) : enteredUnit
+  const unitIva = includesIva ? enteredUnit - unitNet : 0
+  const costForInventory = includesIva ? (recoversIvaCredit ? unitNet : enteredUnit) : enteredUnit
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -549,7 +584,7 @@ function NewVariantModal({ product, onClose, onCreated }) {
           barcode: barcode.trim() || null,
           price: price ? Number(price) : null,
           stock: Number(initialStock) || 0,
-          avg_cost: Number(initialCost) || 0,
+          avg_cost: costForInventory,
         })
         .select()
         .single()
@@ -561,10 +596,11 @@ function NewVariantModal({ product, onClose, onCreated }) {
           variant_id: created.id,
           movement_type: 'entrada',
           quantity: Number(initialStock),
-          unit_cost: Number(initialCost) || 0,
+          unit_cost: costForInventory,
+          iva_amount: Number((unitIva * Number(initialStock)).toFixed(2)),
           reason: 'compra',
         })
-        await insertBatch(product.id, created.id, Number(initialStock), Number(initialCost))
+        await insertBatch(product.id, created.id, Number(initialStock), costForInventory)
       }
       onCreated()
     } catch (e2) {
@@ -591,10 +627,23 @@ function NewVariantModal({ product, onClose, onCreated }) {
           <Field label="Stock inicial">
             <input type="number" value={initialStock} onChange={(e) => setInitialStock(e.target.value)} className="input" />
           </Field>
-          <Field label="Costo de compra (c/u)">
+          <Field label={includesIva ? 'Costo de compra c/u (con IVA)' : 'Costo de compra (c/u)'}>
             <input type="number" step="0.01" value={initialCost} onChange={(e) => setInitialCost(e.target.value)} className="input" />
           </Field>
         </div>
+        {Number(initialCost) > 0 && (
+          <label className="flex items-center gap-2 text-sm text-ink/70">
+            <input type="checkbox" checked={includesIva} onChange={(e) => setIncludesIva(e.target.checked)} />
+            El costo incluye IVA (15%)
+          </label>
+        )}
+        {includesIva && Number(initialCost) > 0 && (
+          <p className="text-[11px] text-ink/50 font-mono bg-paperdark px-3 py-2 rounded-sm">
+            Neto: {money(unitNet)} c/u · IVA: {money(unitIva)} c/u · {recoversIvaCredit
+              ? 'se registra el costo NETO (recuperas el IVA como crédito tributario).'
+              : 'se registra el costo CON IVA (no lo recuperas, es Negocio Popular).'}
+          </p>
+        )}
         {err && <p className="text-plum text-sm">{err}</p>}
         <button disabled={saving} className="w-full bg-ink text-paper font-medium py-2.5 rounded-sm hover:bg-ink/90 disabled:opacity-50">
           {saving ? 'Guardando…' : 'Crear variante'}
@@ -604,9 +653,10 @@ function NewVariantModal({ product, onClose, onCreated }) {
   )
 }
 
-function StockEntryModal({ product, variant, onClose, onSaved }) {
+function StockEntryModal({ product, variant, recoversIvaCredit, onClose, onSaved }) {
   const [quantity, setQuantity] = useState('')
   const [unitCost, setUnitCost] = useState('')
+  const [includesIva, setIncludesIva] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState(null)
 
@@ -614,17 +664,24 @@ function StockEntryModal({ product, variant, onClose, onSaved }) {
   const currentStock = target.stock || 0
   const currentAvgCost = target.avg_cost || 0
 
+  // Si el precio incluye IVA: separa el neto del impuesto.
+  // Si el negocio recupera crédito tributario, el costo para el inventario es el NETO (sin IVA).
+  // Si no lo recupera (Negocio Popular), el IVA pagado se queda como parte del costo.
+  const enteredUnit = Number(unitCost) || 0
+  const unitNet = includesIva ? enteredUnit / (1 + IVA_RATE) : enteredUnit
+  const unitIva = includesIva ? enteredUnit - unitNet : 0
+  const costForInventory = includesIva ? (recoversIvaCredit ? unitNet : enteredUnit) : enteredUnit
+
   async function handleSubmit(e) {
     e.preventDefault()
     setSaving(true)
     setErr(null)
     try {
       const qty = Number(quantity)
-      const cost = Number(unitCost)
       if (!qty || qty <= 0) throw new Error('La cantidad debe ser mayor a 0')
 
       const newStock = currentStock + qty
-      const newAvgCost = ((currentStock * currentAvgCost) + (qty * cost)) / newStock
+      const newAvgCost = ((currentStock * currentAvgCost) + (qty * costForInventory)) / newStock
 
       const table = variant ? 'product_variants' : 'products'
       const { error: updErr } = await supabase
@@ -638,11 +695,12 @@ function StockEntryModal({ product, variant, onClose, onSaved }) {
         variant_id: variant ? variant.id : null,
         movement_type: 'entrada',
         quantity: qty,
-        unit_cost: cost,
+        unit_cost: costForInventory,
+        iva_amount: Number((unitIva * qty).toFixed(2)),
         reason: 'compra',
       })
       if (movErr) throw movErr
-      await insertBatch(product.id, variant ? variant.id : null, qty, cost)
+      await insertBatch(product.id, variant ? variant.id : null, qty, costForInventory)
 
       onSaved()
     } catch (e2) {
@@ -661,9 +719,20 @@ function StockEntryModal({ product, variant, onClose, onSaved }) {
         <Field label="Cantidad que compró">
           <input required type="number" value={quantity} onChange={(e) => setQuantity(e.target.value)} className="input" />
         </Field>
-        <Field label="Precio pagado por unidad">
+        <Field label={includesIva ? 'Precio pagado por unidad (con IVA)' : 'Precio pagado por unidad'}>
           <input required type="number" step="0.01" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} className="input" />
         </Field>
+        <label className="flex items-center gap-2 text-sm text-ink/70">
+          <input type="checkbox" checked={includesIva} onChange={(e) => setIncludesIva(e.target.checked)} />
+          El precio de arriba incluye IVA (15%)
+        </label>
+        {includesIva && (
+          <p className="text-[11px] text-ink/50 font-mono bg-paperdark px-3 py-2 rounded-sm">
+            Neto: {money(unitNet)} c/u · IVA: {money(unitIva)} c/u · {recoversIvaCredit
+              ? 'el costo que se registra es el NETO, porque tu negocio recupera el IVA como crédito tributario.'
+              : 'el costo que se registra incluye el IVA, porque tu negocio no lo recupera (Negocio Popular).'}
+          </p>
+        )}
         {err && <p className="text-plum text-sm">{err}</p>}
         <button disabled={saving} className="w-full bg-ink text-paper font-medium py-2.5 rounded-sm hover:bg-ink/90 disabled:opacity-50">
           {saving ? 'Guardando…' : 'Registrar compra'}
